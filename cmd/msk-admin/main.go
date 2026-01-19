@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"time"
 
@@ -13,13 +14,21 @@ import (
 	"github.com/czarnik/msk-account-cli/internal/kafka"
 	"github.com/czarnik/msk-account-cli/internal/logging"
 	"github.com/czarnik/msk-account-cli/internal/output"
-	"github.com/spf13/pflag"
+	"github.com/czarnik/msk-account-cli/internal/telemetry"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
 	outputFormat string
 )
+
+// context key to carry a span from PreRun to PostRun
+type spanKey struct{}
 
 // ---- Test hooks (overridable in tests) ----
 // AWS wrappers
@@ -53,20 +62,34 @@ var newKafkaAdmin = func(ctx context.Context, a kafka.AuthConfig) (kafkaAdmin, e
 }
 
 func main() {
-    // Initialize logging early so all actions are captured.
-    if err := logging.Setup("logs"); err == nil {
-        defer logging.Close()
-        if logging.L != nil {
-            logging.L.Info("start", "args", strings.Join(logging.SanitizeArgs(os.Args), " "))
-        }
-    } else {
-        // Logging init failed; continue without blocking the tool.
-        fmt.Fprintln(os.Stderr, "warning: logging setup failed:", err)
-    }
+	// Context with interrupt for graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// Initialize OpenTelemetry (reads env: OTEL_EXPORTER_OTLP_* , OTEL_SERVICE_NAME)
+	if _, err := telemetry.Setup(ctx); err != nil {
+		if logging.L != nil {
+			logging.L.Error("telemetry_setup_failed", "error", err)
+		}
+	} else {
+		defer func() { _ = telemetry.Shutdown(ctx) }()
+	}
+
+	// Initialize logging after telemetry so OTel logs handler is included.
+	if err := logging.Setup("logs"); err == nil {
+		defer logging.Close()
+		if logging.L != nil {
+			logging.L.Info("start", "args", strings.Join(logging.SanitizeArgs(os.Args), " "))
+		}
+	} else {
+		// Logging init failed; continue without blocking the tool.
+		fmt.Fprintln(os.Stderr, "warning: logging setup failed:", err)
+	}
 
 	root := &cobra.Command{
-		Use:   "msk-admin",
-		Short: "Administer MSK SCRAM accounts, Kafka ACLs and consumer groups",
+		Use:     "msk-account-cli",
+		Aliases: []string{"msk-admin"},
+		Short:   "Administer MSK SCRAM accounts, Kafka ACLs and consumer groups",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Load config once
 			cfg, _, err := config.LoadAppConfig("")
@@ -102,6 +125,16 @@ func main() {
 				kv = logging.SanitizeKV(kv...)
 				logging.L.Info("invoke", kv...)
 			}
+
+			// Attach a span to the command context so sub-ops can be traced
+			tr := otel.Tracer("github.com/czarnik/msk-account-cli/cli")
+			ctxSpan, span := tr.Start(cmd.Context(), "cli.invoke", trace.WithAttributes(
+				attribute.String("cli.command", cmd.CommandPath()),
+				attribute.String("cli.output", outputFormat),
+			))
+			// Carry span in context so we can end it in PersistentPostRun
+			ctxWithSpan := context.WithValue(ctxSpan, spanKey{}, span)
+			cmd.SetContext(ctxWithSpan)
 			return nil
 		},
 	}
@@ -118,11 +151,30 @@ func main() {
 	// gui command
 	root.AddCommand(cmdGUI())
 
-	if err := root.Execute(); err != nil {
+	// Start a root span for the entire CLI run and propagate via root context
+	tr := otel.Tracer("github.com/czarnik/msk-account-cli/cli")
+	rootCtx, rootSpan := tr.Start(ctx, "cli.run", trace.WithAttributes(attribute.String("args", strings.Join(logging.SanitizeArgs(os.Args), " "))))
+	root.SetContext(rootCtx)
+
+	// End the cli.invoke span from PreRun in a PersistentPostRun hook
+	root.PersistentPostRun = func(cmd *cobra.Command, args []string) {
+		if v := cmd.Context().Value(spanKey{}); v != nil {
+			if sp, ok := v.(trace.Span); ok {
+				sp.End()
+			}
+		}
+	}
+
+	err := root.Execute()
+	rootSpan.End()
+
+	if err != nil {
 		if logging.L != nil {
 			logging.L.Error("command_failed", "error", err)
 		}
 		fmt.Fprintln(os.Stderr, err)
+		// Ensure telemetry flush even on error
+		_ = telemetry.Shutdown(ctx)
 		os.Exit(1)
 	}
 	if logging.L != nil {

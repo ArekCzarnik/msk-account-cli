@@ -1,14 +1,17 @@
 package aws
 
 import (
-    "context"
-    "fmt"
-    "strconv"
+	"context"
+	"fmt"
+	"strconv"
 
-    awsconfig "github.com/aws/aws-sdk-go-v2/config"
-    "github.com/aws/aws-sdk-go-v2/service/kafka"
-    ktypes "github.com/aws/aws-sdk-go-v2/service/kafka/types"
-    "github.com/czarnik/msk-account-cli/internal/logging"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/kafka"
+	ktypes "github.com/aws/aws-sdk-go-v2/service/kafka/types"
+	"github.com/czarnik/msk-account-cli/internal/logging"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type AssociateSecretsParams struct {
@@ -18,31 +21,40 @@ type AssociateSecretsParams struct {
 }
 
 func AssociateSecrets(ctx context.Context, p AssociateSecretsParams) error {
-    if logging.L != nil {
-        logging.L.Info("aws.msk.associate_secrets", "region", p.Region, "cluster_arn", p.ClusterARN, "secret_arns_count", len(p.SecretARNs))
-    }
-    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/aws").Start(ctx, "msk.associate_secrets",
+		trace.WithAttributes(
+			attribute.String("aws.region", p.Region),
+			attribute.String("msk.cluster_arn", p.ClusterARN),
+			attribute.Int("msk.secret_arns_count", len(p.SecretARNs)),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("aws.msk.associate_secrets", "region", p.Region, "cluster_arn", p.ClusterARN, "secret_arns_count", len(p.SecretARNs))
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(tctx, awsconfig.WithRegion(p.Region))
 	if err != nil {
 		return err
 	}
 	cli := kafka.NewFromConfig(cfg)
-    out, err := cli.BatchAssociateScramSecret(ctx, &kafka.BatchAssociateScramSecretInput{
-        ClusterArn:    &p.ClusterARN,
-        SecretArnList: p.SecretARNs,
-    })
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("aws.msk.associate_secrets.error", "error", err)
-        }
-        return err
-    }
-    if out.UnprocessedScramSecrets != nil && len(out.UnprocessedScramSecrets) > 0 {
-        return fmt.Errorf("%d secrets unprocessed by BatchAssociateScramSecret", len(out.UnprocessedScramSecrets))
-    }
-    if logging.L != nil {
-        logging.L.Info("aws.msk.associate_secrets.ok")
-    }
-    return nil
+	out, err := cli.BatchAssociateScramSecret(tctx, &kafka.BatchAssociateScramSecretInput{
+		ClusterArn:    &p.ClusterARN,
+		SecretArnList: p.SecretARNs,
+	})
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("aws.msk.associate_secrets.error", "error", err)
+		}
+		return err
+	}
+	if out.UnprocessedScramSecrets != nil && len(out.UnprocessedScramSecrets) > 0 {
+		return fmt.Errorf("%d secrets unprocessed by BatchAssociateScramSecret", len(out.UnprocessedScramSecrets))
+	}
+	if logging.L != nil {
+		logging.L.Info("aws.msk.associate_secrets.ok")
+	}
+	return nil
 }
 
 type DisassociateSecretsParams struct {
@@ -52,31 +64,40 @@ type DisassociateSecretsParams struct {
 }
 
 func DisassociateSecrets(ctx context.Context, p DisassociateSecretsParams) error {
-    if logging.L != nil {
-        logging.L.Info("aws.msk.disassociate_secrets", "region", p.Region, "cluster_arn", p.ClusterARN, "secret_arns_count", len(p.SecretARNs))
-    }
-    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/aws").Start(ctx, "msk.disassociate_secrets",
+		trace.WithAttributes(
+			attribute.String("aws.region", p.Region),
+			attribute.String("msk.cluster_arn", p.ClusterARN),
+			attribute.Int("msk.secret_arns_count", len(p.SecretARNs)),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("aws.msk.disassociate_secrets", "region", p.Region, "cluster_arn", p.ClusterARN, "secret_arns_count", len(p.SecretARNs))
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(tctx, awsconfig.WithRegion(p.Region))
 	if err != nil {
 		return err
 	}
 	cli := kafka.NewFromConfig(cfg)
-    out, err := cli.BatchDisassociateScramSecret(ctx, &kafka.BatchDisassociateScramSecretInput{
-        ClusterArn:    &p.ClusterARN,
-        SecretArnList: p.SecretARNs,
-    })
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("aws.msk.disassociate_secrets.error", "error", err)
-        }
-        return err
-    }
-    if out.UnprocessedScramSecrets != nil && len(out.UnprocessedScramSecrets) > 0 {
-        return fmt.Errorf("%d secrets unprocessed by BatchDisassociateScramSecret", len(out.UnprocessedScramSecrets))
-    }
-    if logging.L != nil {
-        logging.L.Info("aws.msk.disassociate_secrets.ok")
-    }
-    return nil
+	out, err := cli.BatchDisassociateScramSecret(tctx, &kafka.BatchDisassociateScramSecretInput{
+		ClusterArn:    &p.ClusterARN,
+		SecretArnList: p.SecretARNs,
+	})
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("aws.msk.disassociate_secrets.error", "error", err)
+		}
+		return err
+	}
+	if out.UnprocessedScramSecrets != nil && len(out.UnprocessedScramSecrets) > 0 {
+		return fmt.Errorf("%d secrets unprocessed by BatchDisassociateScramSecret", len(out.UnprocessedScramSecrets))
+	}
+	if logging.L != nil {
+		logging.L.Info("aws.msk.disassociate_secrets.ok")
+	}
+	return nil
 }
 
 // MSKClusterSummary represents a minimal cluster view.
@@ -89,10 +110,18 @@ type MSKClusterSummary struct {
 
 // ListClusters returns MSK clusters (name + ARN). Optional namePrefix filters by cluster name prefix.
 func ListClusters(ctx context.Context, region string, namePrefix string) ([]MSKClusterSummary, error) {
-    if logging.L != nil {
-        logging.L.Info("aws.msk.list_clusters", "region", region, "name_prefix", namePrefix)
-    }
-    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/aws").Start(ctx, "msk.list_clusters",
+		trace.WithAttributes(
+			attribute.String("aws.region", region),
+			attribute.String("msk.name_prefix", namePrefix),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("aws.msk.list_clusters", "region", region, "name_prefix", namePrefix)
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(tctx, awsconfig.WithRegion(region))
 	if err != nil {
 		return nil, err
 	}
@@ -118,10 +147,10 @@ func ListClusters(ctx context.Context, region string, namePrefix string) ([]MSKC
 			out = append(out, row)
 		}
 	}
-    if logging.L != nil {
-        logging.L.Info("aws.msk.list_clusters.ok", "count", len(out))
-    }
-    return out, nil
+	if logging.L != nil {
+		logging.L.Info("aws.msk.list_clusters.ok", "count", len(out))
+	}
+	return out, nil
 }
 
 func deref(p *string) string {
@@ -145,10 +174,18 @@ type BrokerEndpoint struct {
 
 // ListBrokers enumerates broker nodes and returns their endpoints.
 func ListBrokers(ctx context.Context, region, clusterARN string) ([]BrokerEndpoint, error) {
-    if logging.L != nil {
-        logging.L.Info("aws.msk.list_brokers", "region", region, "cluster_arn", clusterARN)
-    }
-    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/aws").Start(ctx, "msk.list_brokers",
+		trace.WithAttributes(
+			attribute.String("aws.region", region),
+			attribute.String("msk.cluster_arn", clusterARN),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("aws.msk.list_brokers", "region", region, "cluster_arn", clusterARN)
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(tctx, awsconfig.WithRegion(region))
 	if err != nil {
 		return nil, err
 	}
@@ -174,8 +211,8 @@ func ListBrokers(ctx context.Context, region, clusterARN string) ([]BrokerEndpoi
 			}
 		}
 	}
-    if logging.L != nil {
-        logging.L.Info("aws.msk.list_brokers.ok", "count", len(out))
-    }
-    return out, nil
+	if logging.L != nil {
+		logging.L.Info("aws.msk.list_brokers.ok", "count", len(out))
+	}
+	return out, nil
 }

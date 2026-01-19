@@ -1,18 +1,21 @@
 package kafka
 
 import (
-    "context"
-    "crypto/sha256"
-    "crypto/sha512"
-    "errors"
-    "fmt"
-    "hash"
-    "strings"
-    "time"
+	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"errors"
+	"fmt"
+	"hash"
+	"strings"
+	"time"
 
-    "github.com/IBM/sarama"
-    "github.com/czarnik/msk-account-cli/internal/logging"
-    xdg "github.com/xdg-go/scram"
+	"github.com/IBM/sarama"
+	"github.com/czarnik/msk-account-cli/internal/logging"
+	xdg "github.com/xdg-go/scram"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // AuthConfig contains Kafka connection info.
@@ -47,14 +50,23 @@ type admin struct {
 
 // NewAdmin connects and returns an Admin client.
 func NewAdmin(ctx context.Context, a AuthConfig) (*admin, error) {
-    if logging.L != nil {
-        logging.L.Info("kafka.admin.connect",
-            "brokers", strings.Join(a.Brokers, ","),
-            "username", a.SASLUsername,
-            "scram", a.SCRAMMechanism,
-        )
-    }
-    cfg := sarama.NewConfig()
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.admin.connect",
+		trace.WithAttributes(
+			attribute.String("kafka.brokers", strings.Join(a.Brokers, ",")),
+			attribute.String("kafka.scram", a.SCRAMMechanism),
+			attribute.String("kafka.username", a.SASLUsername),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.admin.connect",
+			"brokers", strings.Join(a.Brokers, ","),
+			"username", a.SASLUsername,
+			"scram", a.SCRAMMechanism,
+		)
+	}
+	cfg := sarama.NewConfig()
 	cfg.Version = sarama.V2_5_0_0 // MSK typically supports >= 2.x; adjust if needed
 	cfg.Net.TLS.Enable = true
 	cfg.Net.SASL.Enable = true
@@ -82,17 +94,17 @@ func NewAdmin(ctx context.Context, a AuthConfig) (*admin, error) {
 		}
 	}
 
-    ca, err := sarama.NewClusterAdmin(a.Brokers, cfg)
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("kafka.admin.connect.error", "error", err)
-        }
-        return nil, err
-    }
-    if logging.L != nil {
-        logging.L.Info("kafka.admin.connect.ok")
-    }
-    return &admin{ca: ca}, nil
+	ca, err := sarama.NewClusterAdmin(a.Brokers, cfg)
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.admin.connect.error", "error", err)
+		}
+		return nil, err
+	}
+	if logging.L != nil {
+		logging.L.Info("kafka.admin.connect.ok")
+	}
+	return &admin{ca: ca}, nil
 }
 
 func (a *admin) Close() error { return a.ca.Close() }
@@ -137,21 +149,34 @@ type DeleteACLsParams struct {
 }
 
 func (a *admin) CreateACL(ctx context.Context, p CreateACLParams) error {
-    if logging.L != nil {
-        logging.L.Info("kafka.acl.create",
-            "resource_type", p.ResourceType,
-            "resource_name", p.ResourceName,
-            "pattern", p.ResourcePattern,
-            "principal", p.Principal,
-            "host", p.Host,
-            "operation", p.Operation,
-            "permission", p.Permission,
-        )
-    }
-    resType, err := toResourceType(p.ResourceType)
-    if err != nil {
-        return err
-    }
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.acl.create",
+		trace.WithAttributes(
+			attribute.String("resource.type", p.ResourceType),
+			attribute.String("resource.name", p.ResourceName),
+			attribute.String("pattern", p.ResourcePattern),
+			attribute.String("principal", p.Principal),
+			attribute.String("host", p.Host),
+			attribute.String("operation", p.Operation),
+			attribute.String("permission", p.Permission),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.acl.create",
+			"resource_type", p.ResourceType,
+			"resource_name", p.ResourceName,
+			"pattern", p.ResourcePattern,
+			"principal", p.Principal,
+			"host", p.Host,
+			"operation", p.Operation,
+			"permission", p.Permission,
+		)
+	}
+	resType, err := toResourceType(p.ResourceType)
+	if err != nil {
+		return err
+	}
 	pattType, err := toPatternType(p.ResourcePattern)
 	if err != nil {
 		return err
@@ -167,29 +192,39 @@ func (a *admin) CreateACL(ctx context.Context, p CreateACLParams) error {
 
 	res := sarama.Resource{ResourceType: resType, ResourceName: p.ResourceName, ResourcePatternType: pattType}
 	acl := sarama.Acl{Principal: p.Principal, Host: emptyOr(p.Host, "*"), Operation: op, PermissionType: perm}
-    err = a.ca.CreateACL(res, acl)
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("kafka.acl.create.error", "error", err)
-        }
-        return err
-    }
-    if logging.L != nil {
-        logging.L.Info("kafka.acl.create.ok")
-    }
-    return nil
+	err = a.ca.CreateACL(res, acl)
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.acl.create.error", "error", err)
+		}
+		return err
+	}
+	if logging.L != nil {
+		logging.L.Info("kafka.acl.create.ok")
+	}
+	return nil
 }
 
 func (a *admin) ListACLs(ctx context.Context, p ListACLsParams) ([]ACLEntry, error) {
-    if logging.L != nil {
-        logging.L.Info("kafka.acl.list",
-            "resource_type", p.ResourceType,
-            "resource_name", p.ResourceName,
-            "principal", p.Principal,
-            "operation", p.Operation,
-        )
-    }
-    filter := sarama.AclFilter{}
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.acl.list",
+		trace.WithAttributes(
+			attribute.String("resource.type", p.ResourceType),
+			attribute.String("resource.name", p.ResourceName),
+			attribute.String("principal", p.Principal),
+			attribute.String("operation", p.Operation),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.acl.list",
+			"resource_type", p.ResourceType,
+			"resource_name", p.ResourceName,
+			"principal", p.Principal,
+			"operation", p.Operation,
+		)
+	}
+	filter := sarama.AclFilter{}
 	if p.ResourceType != "" {
 		rt, err := toResourceType(p.ResourceType)
 		if err != nil {
@@ -212,13 +247,13 @@ func (a *admin) ListACLs(ctx context.Context, p ListACLsParams) ([]ACLEntry, err
 		}
 		filter.Operation = op
 	}
-    res, err := a.ca.ListAcls(filter)
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("kafka.acl.list.error", "error", err)
-        }
-        return nil, err
-    }
+	res, err := a.ca.ListAcls(filter)
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.acl.list.error", "error", err)
+		}
+		return nil, err
+	}
 	var out []ACLEntry
 	for _, ra := range res {
 		for _, acl := range ra.Acls {
@@ -233,25 +268,38 @@ func (a *admin) ListACLs(ctx context.Context, p ListACLsParams) ([]ACLEntry, err
 			})
 		}
 	}
-    if logging.L != nil {
-        logging.L.Info("kafka.acl.list.ok", "count", len(out))
-    }
-    return out, nil
+	if logging.L != nil {
+		logging.L.Info("kafka.acl.list.ok", "count", len(out))
+	}
+	return out, nil
 }
 
 func (a *admin) DeleteACLs(ctx context.Context, p DeleteACLsParams) ([]ACLEntry, error) {
-    if logging.L != nil {
-        logging.L.Info("kafka.acl.delete",
-            "resource_type", p.ResourceType,
-            "resource_name", p.ResourceName,
-            "pattern", p.ResourcePattern,
-            "principal", p.Principal,
-            "host", p.Host,
-            "operation", p.Operation,
-            "permission", p.Permission,
-        )
-    }
-    filter := sarama.AclFilter{}
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.acl.delete",
+		trace.WithAttributes(
+			attribute.String("resource.type", p.ResourceType),
+			attribute.String("resource.name", p.ResourceName),
+			attribute.String("pattern", p.ResourcePattern),
+			attribute.String("principal", p.Principal),
+			attribute.String("host", p.Host),
+			attribute.String("operation", p.Operation),
+			attribute.String("permission", p.Permission),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.acl.delete",
+			"resource_type", p.ResourceType,
+			"resource_name", p.ResourceName,
+			"pattern", p.ResourcePattern,
+			"principal", p.Principal,
+			"host", p.Host,
+			"operation", p.Operation,
+			"permission", p.Permission,
+		)
+	}
+	filter := sarama.AclFilter{}
 	if p.ResourceType != "" {
 		rt, err := toResourceType(p.ResourceType)
 		if err != nil {
@@ -293,13 +341,13 @@ func (a *admin) DeleteACLs(ctx context.Context, p DeleteACLsParams) ([]ACLEntry,
 		filter.PermissionType = pe
 	}
 
-    matches, err := a.ca.DeleteACL(filter, false)
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("kafka.acl.delete.error", "error", err)
-        }
-        return nil, err
-    }
+	matches, err := a.ca.DeleteACL(filter, false)
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.acl.delete.error", "error", err)
+		}
+		return nil, err
+	}
 	var out []ACLEntry
 	for _, m := range matches {
 		out = append(out, ACLEntry{
@@ -312,33 +360,36 @@ func (a *admin) DeleteACLs(ctx context.Context, p DeleteACLsParams) ([]ACLEntry,
 			Permission:      fromPermission(m.Acl.PermissionType),
 		})
 	}
-    if logging.L != nil {
-        logging.L.Info("kafka.acl.delete.ok", "count", len(out))
-    }
-    return out, nil
+	if logging.L != nil {
+		logging.L.Info("kafka.acl.delete.ok", "count", len(out))
+	}
+	return out, nil
 }
 
 // Consumer groups
 
 func (a *admin) ListConsumerGroups(ctx context.Context) ([]string, error) {
-    if logging.L != nil {
-        logging.L.Info("kafka.group.list")
-    }
-    m, err := a.ca.ListConsumerGroups()
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("kafka.group.list.error", "error", err)
-        }
-        return nil, err
-    }
-    out := make([]string, 0, len(m))
-    for g := range m {
-        out = append(out, g)
-    }
-    if logging.L != nil {
-        logging.L.Info("kafka.group.list.ok", "count", len(out))
-    }
-    return out, nil
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.group.list")
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.group.list")
+	}
+	m, err := a.ca.ListConsumerGroups()
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.group.list.error", "error", err)
+		}
+		return nil, err
+	}
+	out := make([]string, 0, len(m))
+	for g := range m {
+		out = append(out, g)
+	}
+	if logging.L != nil {
+		logging.L.Info("kafka.group.list.ok", "count", len(out))
+	}
+	return out, nil
 }
 
 type GroupMember struct {
@@ -354,16 +405,20 @@ type ConsumerGroupDescription struct {
 }
 
 func (a *admin) DescribeConsumerGroup(ctx context.Context, groupID string) (*ConsumerGroupDescription, error) {
-    if logging.L != nil {
-        logging.L.Info("kafka.group.describe", "group_id", groupID)
-    }
-    descs, err := a.ca.DescribeConsumerGroups([]string{groupID})
-    if err != nil {
-        if logging.L != nil {
-            logging.L.Error("kafka.group.describe.error", "error", err)
-        }
-        return nil, err
-    }
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.group.describe",
+		trace.WithAttributes(attribute.String("group.id", groupID)))
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.group.describe", "group_id", groupID)
+	}
+	descs, err := a.ca.DescribeConsumerGroups([]string{groupID})
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.group.describe.error", "error", err)
+		}
+		return nil, err
+	}
 	if len(descs) == 0 {
 		return nil, fmt.Errorf("group %s not found", groupID)
 	}
@@ -372,28 +427,32 @@ func (a *admin) DescribeConsumerGroup(ctx context.Context, groupID string) (*Con
 	for _, m := range d.Members {
 		out.Members = append(out.Members, GroupMember{MemberID: m.MemberId, ClientID: m.ClientId, ClientHost: m.ClientHost})
 	}
-    if logging.L != nil {
-        logging.L.Info("kafka.group.describe.ok", "members", len(out.Members), "state", out.State)
-    }
-    return out, nil
+	if logging.L != nil {
+		logging.L.Info("kafka.group.describe.ok", "members", len(out.Members), "state", out.State)
+	}
+	return out, nil
 }
 
 func (a *admin) DeleteConsumerGroups(ctx context.Context, groupIDs []string) (map[string]error, error) {
-    if len(groupIDs) == 0 {
-        return nil, errors.New("at least one group-id must be provided")
-    }
-    if logging.L != nil {
-        logging.L.Info("kafka.group.delete", "count", len(groupIDs))
-    }
-    res := make(map[string]error, len(groupIDs))
-    for _, g := range groupIDs {
-        err := a.ca.DeleteConsumerGroup(g)
-        res[g] = err
-    }
-    if logging.L != nil {
-        logging.L.Info("kafka.group.delete.done")
-    }
-    return res, nil
+	if len(groupIDs) == 0 {
+		return nil, errors.New("at least one group-id must be provided")
+	}
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.group.delete",
+		trace.WithAttributes(attribute.Int("group.count", len(groupIDs))))
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.group.delete", "count", len(groupIDs))
+	}
+	res := make(map[string]error, len(groupIDs))
+	for _, g := range groupIDs {
+		err := a.ca.DeleteConsumerGroup(g)
+		res[g] = err
+	}
+	if logging.L != nil {
+		logging.L.Info("kafka.group.delete.done")
+	}
+	return res, nil
 }
 
 // mapping helpers

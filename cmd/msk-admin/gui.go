@@ -22,7 +22,7 @@ func cmdGUI() *cobra.Command {
 			app := tview.NewApplication()
 
 			header := tview.NewTextView().SetTextAlign(tview.AlignLeft)
-			header.SetText("MSK Admin GUI — Press q to quit")
+			header.SetText("MSK Account CLI — Press q to quit")
 
 			status := tview.NewTextView().SetDynamicColors(true)
 			setStatus := func(s string) { app.QueueUpdateDraw(func() { status.SetText(s) }) }

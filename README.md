@@ -155,6 +155,101 @@ All CLI actions are written as JSON logs to the `logs/` directory, in files name
 - Example entry:
   `{ "time": "...", "level": "INFO", "msg": "invoke", "cmd": "msk-admin account create", "secret-name": "AmazonMSK_example", "password": "********" }`
 
+## OpenTelemetry (Tracing & Logs)
+
+Dieses CLI emittiert OpenTelemetry‑Traces und ‑Logs. Beides ist „opt‑in“: Telemetry wird NUR aktiviert, wenn ein OTLP‑Endpoint via Umgebungsvariable gesetzt ist (`OTEL_EXPORTER_OTLP_ENDPOINT` oder die signal‑spezifischen `..._TRACES_ENDPOINT` / `..._LOGS_ENDPOINT`).
+
+- Export: OTLP über gRPC oder HTTP/Protobuf – konfiguriert ausschließlich über `OTEL_*`‑Variablen (keine zusätzlichen Flags nötig)
+  - `OTEL_SERVICE_NAME` (Standard: `msk-account-cli`)
+  - Gemeinsamer Endpoint: `OTEL_EXPORTER_OTLP_ENDPOINT`
+  - Nur Logs (optional): `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_HEADERS`, `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`
+  - Nur Traces (optional): `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_HEADERS`, `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`
+  - Protokollwahl: `OTEL_EXPORTER_OTLP_PROTOCOL` bzw. signal‑spezifisch `..._TRACES_PROTOCOL` / `..._LOGS_PROTOCOL` mit Werten `grpc` (Standard) oder `http`/`http/protobuf`
+  - gRPC: Port 4317 (Standard) | HTTP: Port 4318 (Standard)
+  - `OTEL_EXPORTER_OTLP_INSECURE=true` für unverschlüsseltes gRPC bzw. HTTP (http://)
+  - `OTEL_EXPORTER_OTLP_HEADERS` für optionale Header (z. B. `api-key=...`)
+
+Erzeugte Spans
+- `cli.run`, `cli.invoke` (Rahmen um jeden CLI‑Aufruf)
+- `aws.secrets.*`, `aws.kms.*`, `aws.msk.*` (AWS SDK Operationen)
+- `kafka.*` (ACL- und Consumer-Group‑Operationen)
+
+Schnellstart (lokaler Collector gRPC auf 4317/tcp)
+```
+export OTEL_SERVICE_NAME=msk-admin
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+export OTEL_EXPORTER_OTLP_INSECURE=true
+msk-admin msk list-clusters --region us-east-1
+```
+
+HTTP/Protobuf Beispiel (lokaler Collector auf 4318/tcp)
+```
+export OTEL_SERVICE_NAME=msk-admin
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+msk-admin account list --region eu-central-1
+```
+
+#### OTLP über HTTP – Variablen
+- Gemeinsame Einstellungen
+  - `OTEL_EXPORTER_OTLP_ENDPOINT=http://<host>:4318` (oder `https://…`)
+  - `OTEL_EXPORTER_OTLP_PROTOCOL=http` (alias: `http/protobuf`)
+  - `OTEL_EXPORTER_OTLP_HEADERS=k=v,k2=v2` (optional)
+- Traces‑spezifisch
+  - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://<host>:4318[/v1/traces]`
+  - `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http`
+  - `OTEL_EXPORTER_OTLP_TRACES_HEADERS=...` (optional)
+- Logs‑spezifisch
+  - `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://<host>:4318[/v1/logs]`
+  - `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http`
+  - `OTEL_EXPORTER_OTLP_LOGS_HEADERS=...` (optional)
+
+Hinweise
+- Wenn kein Pfad angegeben ist, verwendet der Exporter automatisch `/v1/traces` bzw. `/v1/logs`.
+- Ohne gesetzten OTLP‑Endpoint bleibt Telemetry vollständig deaktiviert (keine Versuche, `localhost` zu erreichen).
+
+Hinweise
+- Das Tracing ist fehlertolerant: Falls der Collector nicht erreichbar ist, läuft das CLI weiter.
+- Traces & Logs verwenden Batching; beim Beenden wird automatisch geflusht (auch bei Fehlern).
+- Sensible Inhalte (Passwörter, Secrets) werden weder geloggt noch als Trace‑Attribute hinzugefügt.
+
+### Logging → OTel
+
+Das CLI schreibt weiterhin lokale JSON‑Dateien nach `logs/`. Zusätzlich werden dieselben Log‑Einträge via OTel Logs exportiert (slog‑Bridge › OTel Logs). Sobald `OTEL_EXPORTER_OTLP_(LOGS_)ENDPOINT` gesetzt ist, gehen Logs parallel zum Collector.
+
+#### OTel‑Logs aktivieren
+
+- Gemeinsamer Endpoint für Traces & Logs (empfohlen):
+  - `OTEL_SERVICE_NAME=msk-admin`
+  - `OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317`
+  - `OTEL_EXPORTER_OTLP_INSECURE=true` (für lokalen, unverschlüsselten Collector)
+
+- Separater Logs‑Endpoint (optional):
+  - gRPC: `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=localhost:4317`, `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=grpc`
+  - HTTP: `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:4318`, `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http` (oder `http/protobuf`)
+  - Optional: `OTEL_EXPORTER_OTLP_LOGS_HEADERS=api-key=...`
+
+Beispiel:
+```
+export OTEL_SERVICE_NAME=msk-admin
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+export OTEL_EXPORTER_OTLP_INSECURE=true
+msk-admin account list --region eu-central-1
+```
+
+#### Format & Felder
+- Lokale Datei: JSON‑Zeilen mit `time`, `level`, `msg` und Attributen (z. B. `cmd`, `region`, …).
+- OTel Logs: Severity + Body + Attribute‑Map analog zu den lokalen Feldern.
+- Sensible Werte (Passwörter, Tokens, Secrets) werden maskiert (`********`).
+
+#### Troubleshooting
+- Keine Logs im Backend? Prüfe, ob der Collector auf dem gRPC‑Port (z. B. 4317) erreichbar ist und OTLP‑Logs akzeptiert.
+- Für lokale Tests ggf. `OTEL_EXPORTER_OTLP_INSECURE=true` setzen.
+- Parallel werden Logs immer in `logs/` geschrieben (unabhängig vom OTel‑Export).
+
+
+
+
 
 ## Documentation snippet to embed into README
 Explain the MSK secret requirements:
