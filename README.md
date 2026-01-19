@@ -1,6 +1,6 @@
-## msk-account-cli 
+## msk-account-cli
 
-is a Application that uses the AWS SDK for Go v2 to manage Amazon MSK SCRAM accounts stored in AWS Secrets Manager and to administer Kafka ACLs and consumer group IDs on an MSK cluster.
+is an application that uses the AWS SDK for Go v2 to manage Amazon MSK SCRAM accounts stored in AWS Secrets Manager and to administer Kafka ACLs and consumer group IDs on an MSK cluster.
 
 ## Goal
 Implement a CLI tool named `msk-admin` that can:
@@ -8,7 +8,7 @@ Implement a CLI tool named `msk-admin` that can:
 2) Associate (and optionally disassociate) the created secret with an MSK cluster using the MSK API.
 3) Connect to the Kafka cluster (bootstrap brokers) and manage:
     - ACLs (create/list/delete)
-    - Consumer groups (list/describe/delete) a.k.a. “Group-ID verwalten”
+    - Consumer groups (list/describe/delete) a.k.a. "manage Group-ID"
 
 ## Requirements (Secrets Manager + MSK)
 When creating a secret for MSK SCRAM:
@@ -22,7 +22,7 @@ When creating a secret for MSK SCRAM:
 - After creating the secret, output the secret ARN.
 - Provide a command to associate the secret with an MSK cluster via `BatchAssociateScramSecret`.
 - Add guardrails:
-    - If `kmsKeyId` is missing, fail with a clear error explaining that default KMS key cannot be used with MSK.
+    - If `kmsKeyId` is missing, fail with a clear error explaining that the default KMS key cannot be used with MSK.
     - Validate secret name prefix.
     - Validate JSON structure has non-empty username/password.
 
@@ -44,7 +44,7 @@ Implement with cobra OR standard library flag parsing (cobra preferred). Provide
 - `msk-admin account create`
   Flags:
     - `--region`
-    - `--secret-name` (must start with AmazonMSK_)
+    - `--secret-name` (must start with AmazonMSK\_)
     - `--kms-key-id` (required; key ID or ARN; do NOT accept alias)
     - `--username`
     - `--password`
@@ -147,9 +147,9 @@ Generate a clean module layout:
 
 ## Documentation snippet to embed into README
 Explain the MSK secret requirements:
-- "Other type of secrets" conceptually (we just create plaintext JSON)
-- Name prefix AmazonMSK_
-- MUST use customer-managed KMS key (default key not allowed)
+- "Other types of secrets" conceptually (we just create plaintext JSON)
+- Name prefix `AmazonMSK\_`
+- MUST use a customer-managed KMS key (default key not allowed)
 - Format for username/password JSON
 - After creation, associate secret to cluster via BatchAssociateScramSecret
   Also mention: if using AWS CLI, kms-key-id should be key ID/ARN not alias (our tool enforces this).
@@ -161,106 +161,148 @@ Explain the MSK secret requirements:
 
 GUI Mode (TUI)
 
-- Interaktive Ansicht mit `tview` starten
+- Start interactive view with `tview`
   `bin/msk-admin gui`
-  - Links: Menü (Accounts, MSK, ACL, Groups)
-  - Rechts: Ergebnis-Tabelle/Details
-  - Eingabemasken fragen dieselben Parameter ab wie die jeweiligen Commands (z. B. `--region`, `--brokers`, Auth usw.).
-  - Taste `q` beendet den GUI‑Modus.
+    - Left: menu (Accounts, MSK, ACL, Groups)
+    - Right: result table/details
+    - Input masks ask for the same parameters as the respective commands (e.g. `--region`, `--brokers`, auth, etc.).
+    - Key `q` exits GUI mode.
 
 Secrets / Accounts
 
 - Create secret
-  `bin/msk-admin account create --region eu-central-1 --secret-name AmazonMSK_alice --kms-key-id arn:aws:kms:eu-central-1:111122223333:key/abcd-... --username alice --password 'S3cretP@ss' --tags env=dev --tags owner=platform`
+  ~~~
+  bin/msk-admin account create --region eu-central-1 --secret-name AmazonMSK_alice --kms-key-id arn:aws:kms:eu-central-1:111122223333:key/abcd-... --username alice --password 'S3cretP@ss' --tags env=dev --tags owner=platform
+  ~~~
 
 - Create secret and auto-create a KMS key
-  `bin/msk-admin account create --region eu-central-1 --secret-name AmazonMSK_alice --create-kms-key --kms-key-description "MSK SCRAM secrets" --username alice --password 'S3cretP@ss'`
+  ~~~
+  bin/msk-admin account create --region eu-central-1 --secret-name AmazonMSK_alice --create-kms-key --kms-key-description "MSK SCRAM secrets" --username alice --password 'S3cretP@ss'
+  ~~~
 
 - Get secret (username only)
-  `bin/msk-admin account get --region eu-central-1 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX`
+  ~~~
+  bin/msk-admin account get --region eu-central-1 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
+  ~~~
 
 - Get secret (show password)
-  `bin/msk-admin account get --region eu-central-1 --secret-name AmazonMSK_alice --show-password`
+  ~~~
+  bin/msk-admin account get --region eu-central-1 --secret-name AmazonMSK_alice --show-password
+  ~~~
 
-- Alle AmazonMSK_ Accounts auflisten (mit ARN)
-  `bin/msk-admin account list --region eu-central-1`
+- List all AmazonMSK\_ accounts (with ARN)
+  ~~~
+  bin/msk-admin account list --region eu-central-1
+  ~~~
 
-- Delete secret (with 30d recovery)
-  `bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice`
+- Delete secret (30d recovery)
+  ~~~
+  bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice
+  ~~~
 
 - Delete secret immediately (no recovery, irreversible)
-  `bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice --force`
+  ~~~
+  bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice --force
+  ~~~
 
 - Delete secret and schedule KMS key deletion in 7 days
-  `bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice --delete-kms-key --kms-pending-window-days 7`
+  ~~~
+  bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice --delete-kms-key --kms-pending-window-days 7
+  ~~~
 
 MSK association
 
 - Associate secret(s) to cluster
-  `bin/msk-admin msk associate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX`
+  ~~~
+  bin/msk-admin msk associate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
+  ~~~
 
 - Disassociate secret(s)
-  `bin/msk-admin msk disassociate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX`
+  ~~~
+  bin/msk-admin msk disassociate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
+  ~~~
 
 MSK Cluster Listing
 
-- Alle MSK‑Cluster (Name + ARN)
-  `bin/msk-admin msk list-clusters --region eu-central-1`
+- List all MSK clusters (Name + ARN)
+  ~~~
+  bin/msk-admin msk list-clusters --region eu-central-1
+  ~~~
 
-- Mit Namenspräfix filtern
-  `bin/msk-admin msk list-clusters --region eu-central-1 --name-prefix dev-`
+- Filter by name prefix
+  ~~~
+  bin/msk-admin msk list-clusters --region eu-central-1 --name-prefix dev-
+  ~~~
 
-- Zusätzliche Spalten in Tabelle (state/type)
-  `bin/msk-admin msk list-clusters --region eu-central-1 --columns name,arn,state,type`
+- Additional columns in table (state/type)
+  ~~~
+  bin/msk-admin msk list-clusters --region eu-central-1 --columns name,arn,state,type
+  ~~~
 
-- JSON enthält zusätzliche Felder automatisch (state, type)
-  `bin/msk-admin msk list-clusters --region eu-central-1 --output json`
+- JSON contains additional fields automatically (state, type)
+  ~~~
+  bin/msk-admin msk list-clusters --region eu-central-1 --output json
+  ~~~
 
 Kafka Broker Listing
 
-- Broker eines Clusters (ID und Endpoints)
-  `bin/msk-admin msk list-brokers --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-...`
+- Brokers of a cluster (ID and endpoints)
+  ~~~
+  bin/msk-admin msk list-brokers --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-...
+  ~~~
 
 ACL management
 
 - Create ACL (allow alice to read topic foo)
-  `bin/msk-admin acl create --brokers b-1.example.kafka.amazonaws.com:9096,b-2.example.kafka.amazonaws.com:9096 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX --region eu-central-1 --resource-type topic --resource-name foo --principal User:alice --operation read --permission allow`
+  ~~~
+  bin/msk-admin acl create --brokers b-1.example.kafka.amazonaws.com:9096,b-2.example.kafka.amazonaws.com:9096 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX --region eu-central-1 --resource-type topic --resource-name foo --principal User:alice --operation read --permission allow
+  ~~~
 
 - List ACLs for topic foo
-  `bin/msk-admin acl list --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo`
+  ~~~
+  bin/msk-admin acl list --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo
+  ~~~
 
 - Delete ACLs by filter
-  `bin/msk-admin acl delete --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo --operation read --permission allow`
+  ~~~
+  bin/msk-admin acl delete --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo --operation read --permission allow
+  ~~~
 
 Consumer groups
 
 - List groups
-  `bin/msk-admin group list --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1`
+  ~~~
+  bin/msk-admin group list --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1
+  ~~~
 
 - Describe group
-  `bin/msk-admin group describe --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --group-id my-group`
+  ~~~
+  bin/msk-admin group describe --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --group-id my-group
+  ~~~
 
 - Delete groups
-  `bin/msk-admin group delete --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1 --group-id g1 --group-id g2`
+  ~~~
+  bin/msk-admin group delete --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1 --group-id g1 --group-id g2
+  ~~~
 
 Authentication
 
-- Provide credentials via either:
-    - `--sasl-username` and `--sasl-password` (wenn diese Flags fehlen, werden `sasl_username`/`sasl_password` aus der Config verwendet)
-    - oder `--secret-arn` und `--region` (das Tool liest Benutzer/Passwort aus Secrets Manager und überschreibt etwaige Config‑Werte)
+- Provide credentials either via:
+    - `--sasl-username` and `--sasl-password` (if these flags are missing, `sasl_username`/`sasl_password` from the config are used)
+    - or `--secret-arn` and `--region` (the tool reads username/password from Secrets Manager and overrides any config values)
 - SCRAM mechanism defaults to `sha512`; override with `--scram-mechanism sha256` if needed.
 
-Config-Datei (Defaults)
+Config file (defaults)
 
-- Lege eine `default-config.yaml` mit Standardwerten an.
-- Suchreihenfolge:
+- Provide a `default-config.yaml` with default values.
+- Search order:
     1. `./default-config.yaml`
     2. `$XDG_CONFIG_HOME/msk-admin/config.yaml`
     3. `$HOME/.config/msk-admin/config.yaml`
     4. `$HOME/.msk-admin.yaml`
-- Beispiel:
+- Example:
 
-  ```yaml
+  ~~~yaml
   region: eu-central-1
   brokers:
     - b-1.example.kafka.amazonaws.com:9096
@@ -274,11 +316,11 @@ Config-Datei (Defaults)
   kms_key_id: arn:aws:kms:eu-central-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
   # Optional: default MSK cluster ARN used by cluster-related commands
   cluster_arn: arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-efgh
-  ```
+  ~~~
 
-- Flags überschreiben Defaults aus der Config. Wenn z. B. `--brokers` fehlt, werden Werte aus der Config verwendet.
-- Für `account create` gilt: `--kms-key-id` > `--create-kms-key` > `config.kms_key_id`. Ist weder Flag gesetzt noch `kms_key_id` konfiguriert, schlägt der Befehl fehl.
-- Für Cluster‑befehle (z. B. `msk list-brokers`, `msk associate-secret`, `msk disassociate-secret`) gilt: `--cluster-arn` > `config.cluster_arn`.
+- Flags override defaults from the config. For example, if `--brokers` is missing, values from the config are used.
+- For `account create` the precedence is: `--kms-key-id` > `--create-kms-key` > `config.kms_key_id`. If neither flag nor config provides a KMS key id, the command fails.
+- For cluster commands (e.g. `msk list-brokers`, `msk associate-secret`, `msk disassociate-secret`) the precedence is: `--cluster-arn` > `config.cluster_arn`.
 
 IAM Permissions
 
@@ -287,5 +329,5 @@ IAM Permissions
 
 Notes
 
-- Secret name must start with `AmazonMSK_` and use a customer-managed KMS key (non-alias ID/ARN).
+- Secret name must start with `AmazonMSK\_` and use a customer-managed KMS key (non-alias ID/ARN).
 - Password can be provided via `--password`, environment variable `MSK_ADMIN_PASSWORD`, or piped on stdin.
