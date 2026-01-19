@@ -1,9 +1,11 @@
 ## msk-account-cli
 
+![msk-account-cli.png](msk-account-cli.png)
+
 is an application that uses the AWS SDK for Go v2 to manage Amazon MSK SCRAM accounts stored in AWS Secrets Manager and to administer Kafka ACLs and consumer group IDs on an MSK cluster.
 
 ## Goal
-Implement a CLI tool named `msk-admin` that can:
+Implement a CLI tool named `msk-account-cli` that can:
 1) Create and retrieve SCRAM credentials in AWS Secrets Manager following MSK requirements.
 2) Associate (and optionally disassociate) the created secret with an MSK cluster using the MSK API.
 3) Connect to the Kafka cluster (bootstrap brokers) and manage:
@@ -41,7 +43,7 @@ When creating a secret for MSK SCRAM:
 Implement with cobra OR standard library flag parsing (cobra preferred). Provide subcommands:
 
 ### Secrets / Accounts
-- `msk-admin account create`
+- `msk-account-cli account create`
   Flags:
     - `--region`
     - `--secret-name` (must start with AmazonMSK\_)
@@ -53,7 +55,7 @@ Implement with cobra OR standard library flag parsing (cobra preferred). Provide
     - Create secret in Secrets Manager with SecretString JSON and KmsKeyId set.
     - Print: secret ARN.
 
-- `msk-admin account get`
+- `msk-account-cli account get`
   Flags:
     - `--region`
     - `--secret-arn` (or --secret-name)
@@ -61,7 +63,7 @@ Implement with cobra OR standard library flag parsing (cobra preferred). Provide
     - Retrieve and print username (never print password unless `--show-password` is set).
 
 ### MSK association
-- `msk-admin msk associate-secret`
+- `msk-account-cli msk associate-secret`
   Flags:
     - `--region`
     - `--cluster-arn`
@@ -69,7 +71,7 @@ Implement with cobra OR standard library flag parsing (cobra preferred). Provide
       Behavior:
     - Call MSK `BatchAssociateScramSecret` and print result.
 
-- `msk-admin msk disassociate-secret` (optional but nice)
+- `msk-account-cli msk disassociate-secret` (optional but nice)
   Flags:
     - `--region`
     - `--cluster-arn`
@@ -78,7 +80,7 @@ Implement with cobra OR standard library flag parsing (cobra preferred). Provide
     - Call MSK `BatchDisassociateScramSecret` and print result.
 
 ### ACL management
-- `msk-admin acl create`
+- `msk-account-cli acl create`
   Flags:
     - `--brokers`
     - Auth flags: either `--secret-arn + --region` OR `--sasl-username/--sasl-password`
@@ -93,35 +95,35 @@ Implement with cobra OR standard library flag parsing (cobra preferred). Provide
     - Create ACL using Sarama Admin API.
     - Print created entry.
 
-- `msk-admin acl list`
+- `msk-account-cli acl list`
   Flags:
     - same auth/brokers
     - optional filters: resource-type/name, principal, operation
       Behavior:
     - List matching ACLs, print as table.
 
-- `msk-admin acl delete`
+- `msk-account-cli acl delete`
   Flags:
     - same as list/create, but used as filter for deletions
       Behavior:
     - Delete matching ACLs, print what was removed.
 
 ### Consumer group (Group-ID) management
-- `msk-admin group list`
+- `msk-account-cli group list`
   Flags: brokers + auth
   Behavior: list consumer groups.
 
-- `msk-admin group describe`
+- `msk-account-cli group describe`
   Flags: brokers + auth + `--group-id`
   Behavior: describe group (members, state, assignments, lag if available).
 
-- `msk-admin group delete`
+- `msk-account-cli group delete`
   Flags: brokers + auth + `--group-id` (repeatable)
   Behavior: delete groups, print results.
 
 ## Project structure
 Generate a clean module layout:
-- /cmd/msk-admin/main.go
+- /cmd/msk-account-cli/main.go
 - /internal/aws/secrets.go  (create/get secret)
 - /internal/aws/msk.go      (associate/disassociate)
 - /internal/kafka/admin.go  (sarama admin setup, acl/group ops)
@@ -156,13 +158,13 @@ Explain the MSK secret requirements:
 
 ## MSK Admin CLI Usage
 
-- Binary: `bin/msk-admin` (built with `make build`)
+- Binary: `bin/msk-account-cli` (built with `make build`)
 - Output: `--output table|json` (default: `table`)
 
 GUI Mode (TUI)
 
 - Start interactive view with `tview`
-  `bin/msk-admin gui`
+  `bin/msk-account-cli gui`
     - Left: menu (Accounts, MSK, ACL, Groups)
     - Right: result table/details
     - Input masks ask for the same parameters as the respective commands (e.g. `--region`, `--brokers`, auth, etc.).
@@ -172,117 +174,117 @@ Secrets / Accounts
 
 - Create secret
   ~~~
-  bin/msk-admin account create --region eu-central-1 --secret-name AmazonMSK_alice --kms-key-id arn:aws:kms:eu-central-1:111122223333:key/abcd-... --username alice --password 'S3cretP@ss' --tags env=dev --tags owner=platform
+  bin/msk-account-cli account create --region eu-central-1 --secret-name AmazonMSK_alice --kms-key-id arn:aws:kms:eu-central-1:111122223333:key/abcd-... --username alice --password 'S3cretP@ss' --tags env=dev --tags owner=platform
   ~~~
 
 - Create secret and auto-create a KMS key
   ~~~
-  bin/msk-admin account create --region eu-central-1 --secret-name AmazonMSK_alice --create-kms-key --kms-key-description "MSK SCRAM secrets" --username alice --password 'S3cretP@ss'
+  bin/msk-account-cli account create --region eu-central-1 --secret-name AmazonMSK_alice --create-kms-key --kms-key-description "MSK SCRAM secrets" --username alice --password 'S3cretP@ss'
   ~~~
 
 - Get secret (username only)
   ~~~
-  bin/msk-admin account get --region eu-central-1 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
+  bin/msk-account-cli account get --region eu-central-1 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
   ~~~
 
 - Get secret (show password)
   ~~~
-  bin/msk-admin account get --region eu-central-1 --secret-name AmazonMSK_alice --show-password
+  bin/msk-account-cli account get --region eu-central-1 --secret-name AmazonMSK_alice --show-password
   ~~~
 
 - List all AmazonMSK\_ accounts (with ARN)
   ~~~
-  bin/msk-admin account list --region eu-central-1
+  bin/msk-account-cli account list --region eu-central-1
   ~~~
 
 - Delete secret (30d recovery)
   ~~~
-  bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice
+  bin/msk-account-cli account delete --region eu-central-1 --secret-name AmazonMSK_alice
   ~~~
 
 - Delete secret immediately (no recovery, irreversible)
   ~~~
-  bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice --force
+  bin/msk-account-cli account delete --region eu-central-1 --secret-name AmazonMSK_alice --force
   ~~~
 
 - Delete secret and schedule KMS key deletion in 7 days
   ~~~
-  bin/msk-admin account delete --region eu-central-1 --secret-name AmazonMSK_alice --delete-kms-key --kms-pending-window-days 7
+  bin/msk-account-cli account delete --region eu-central-1 --secret-name AmazonMSK_alice --delete-kms-key --kms-pending-window-days 7
   ~~~
 
 MSK association
 
 - Associate secret(s) to cluster
   ~~~
-  bin/msk-admin msk associate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
+  bin/msk-account-cli msk associate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
   ~~~
 
 - Disassociate secret(s)
   ~~~
-  bin/msk-admin msk disassociate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
+  bin/msk-account-cli msk disassociate-secret --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-... --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX
   ~~~
 
 MSK Cluster Listing
 
 - List all MSK clusters (Name + ARN)
   ~~~
-  bin/msk-admin msk list-clusters --region eu-central-1
+  bin/msk-account-cli msk list-clusters --region eu-central-1
   ~~~
 
 - Filter by name prefix
   ~~~
-  bin/msk-admin msk list-clusters --region eu-central-1 --name-prefix dev-
+  bin/msk-account-cli msk list-clusters --region eu-central-1 --name-prefix dev-
   ~~~
 
 - Additional columns in table (state/type)
   ~~~
-  bin/msk-admin msk list-clusters --region eu-central-1 --columns name,arn,state,type
+  bin/msk-account-cli msk list-clusters --region eu-central-1 --columns name,arn,state,type
   ~~~
 
 - JSON contains additional fields automatically (state, type)
   ~~~
-  bin/msk-admin msk list-clusters --region eu-central-1 --output json
+  bin/msk-account-cli msk list-clusters --region eu-central-1 --output json
   ~~~
 
 Kafka Broker Listing
 
 - Brokers of a cluster (ID and endpoints)
   ~~~
-  bin/msk-admin msk list-brokers --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-...
+  bin/msk-account-cli msk list-brokers --region eu-central-1 --cluster-arn arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-...
   ~~~
 
 ACL management
 
 - Create ACL (allow alice to read topic foo)
   ~~~
-  bin/msk-admin acl create --brokers b-1.example.kafka.amazonaws.com:9096,b-2.example.kafka.amazonaws.com:9096 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX --region eu-central-1 --resource-type topic --resource-name foo --principal User:alice --operation read --permission allow
+  bin/msk-account-cli acl create --brokers b-1.example.kafka.amazonaws.com:9096,b-2.example.kafka.amazonaws.com:9096 --secret-arn arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_alice-XXXX --region eu-central-1 --resource-type topic --resource-name foo --principal User:alice --operation read --permission allow
   ~~~
 
 - List ACLs for topic foo
   ~~~
-  bin/msk-admin acl list --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo
+  bin/msk-account-cli acl list --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo
   ~~~
 
 - Delete ACLs by filter
   ~~~
-  bin/msk-admin acl delete --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo --operation read --permission allow
+  bin/msk-account-cli acl delete --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo --operation read --permission allow
   ~~~
 
 Consumer groups
 
 - List groups
   ~~~
-  bin/msk-admin group list --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1
+  bin/msk-account-cli group list --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1
   ~~~
 
 - Describe group
   ~~~
-  bin/msk-admin group describe --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --group-id my-group
+  bin/msk-account-cli group describe --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --group-id my-group
   ~~~
 
 - Delete groups
   ~~~
-  bin/msk-admin group delete --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1 --group-id g1 --group-id g2
+  bin/msk-account-cli group delete --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1 --group-id g1 --group-id g2
   ~~~
 
 Authentication
@@ -297,9 +299,9 @@ Config file (defaults)
 - Provide a `default-config.yaml` with default values.
 - Search order:
     1. `./default-config.yaml`
-    2. `$XDG_CONFIG_HOME/msk-admin/config.yaml`
-    3. `$HOME/.config/msk-admin/config.yaml`
-    4. `$HOME/.msk-admin.yaml`
+    2. `$XDG_CONFIG_HOME/msk-account-cli/config.yaml`
+    3. `$HOME/.config/msk-account-cli/config.yaml`
+    4. `$HOME/.msk-account-cli.yaml`
 - Example:
 
   ~~~yaml

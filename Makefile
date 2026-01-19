@@ -1,4 +1,4 @@
-APP_NAME=msk-admin
+APP_NAME=msk-account-cli
 
 .PHONY: build tidy test clean
 

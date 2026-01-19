@@ -1,4 +1,3 @@
 .idea
-/bin/msk-admin
-/msk-admin
+/bin/*
 default-config.yaml
