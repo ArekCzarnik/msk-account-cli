@@ -1,0 +1,31 @@
+# Default configuration for msk-admin
+# Search order:
+# 1) ./default-config.yaml (this file)
+# 2) $XDG_CONFIG_HOME/msk-admin/config.yaml
+# 3) $HOME/.config/msk-admin/config.yaml
+# 4) $HOME/.msk-admin.yaml
+
+region: eu-central-1
+
+# List of default bootstrap brokers (used when --brokers is omitted)
+brokers:
+  - b-1.testcluster.x.c5.kafka.eu-central-1.amazonaws.com:9096
+  - b-2.testcluster.x.c5.kafka.eu-central-1.amazonaws.com:9096
+
+# Optional: default MSK cluster ARN (used by msk list-brokers / msk associate-secret / msk disassociate-secret)
+cluster_arn:  arn:aws:kafka:eu-central-1:xxxx:cluster/test-cluster/xxxx-5
+
+# Default output format: table or json
+output: table
+
+# Default SCRAM mechanism for Kafka auth when not overridden
+scram_mechanism: sha512
+
+# Optional: default KMS key (ID or ARN) used for Secrets Manager MSK secrets
+# When set, you can omit --kms-key-id on `account create`.
+kms_key_id: arn:aws:kms:eu-central-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+
+# Optional: default SASL credentials for Kafka (used if no --secret-arn and
+# --sasl-username/--sasl-password are omitted). Avoid committing real secrets.
+sasl_username: test
+sasl_password: "test@ss"
