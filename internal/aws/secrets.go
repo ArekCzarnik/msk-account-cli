@@ -1,17 +1,18 @@
 package aws
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"strings"
-	"time"
+    "context"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "strings"
+    "time"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-	smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
-	"github.com/czarnik/msk-account-cli/internal/config"
+    awsconfig "github.com/aws/aws-sdk-go-v2/config"
+    "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+    smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
+    "github.com/czarnik/msk-account-cli/internal/config"
+    "github.com/czarnik/msk-account-cli/internal/logging"
 )
 
 type CreateSecretParams struct {
@@ -36,7 +37,17 @@ func CreateSecret(ctx context.Context, p CreateSecretParams) (string, error) {
 		return "", err
 	}
 
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.create",
+            "region", p.Region,
+            "secret_name", p.SecretName,
+            "kms_key_id", p.KMSKeyID,
+            "username", p.Username,
+            "tags_count", len(p.Tags),
+        )
+    }
+
+    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
 	if err != nil {
 		return "", err
 	}
@@ -68,14 +79,20 @@ func CreateSecret(ctx context.Context, p CreateSecretParams) (string, error) {
 		Tags:         tags,
 	}
 
-	out, err := cli.CreateSecret(ctx, in)
-	if err != nil {
-		return "", err
-	}
-	if out.ARN == nil {
-		return "", errors.New("CreateSecret returned nil ARN")
-	}
-	return *out.ARN, nil
+    out, err := cli.CreateSecret(ctx, in)
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("aws.secrets.create.error", "error", err)
+        }
+        return "", err
+    }
+    if out.ARN == nil {
+        return "", errors.New("CreateSecret returned nil ARN")
+    }
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.create.ok", "arn", *out.ARN)
+    }
+    return *out.ARN, nil
 }
 
 type GetSecretParams struct {
@@ -93,7 +110,17 @@ func GetSecret(ctx context.Context, p GetSecretParams) (*GetSecretResult, error)
 	if p.SecretARN == "" && p.SecretName == "" {
 		return nil, errors.New("either SecretARN or SecretName must be provided")
 	}
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
+    if logging.L != nil {
+        id := p.SecretARN
+        kind := "arn"
+        if id == "" {
+            id = p.SecretName
+            kind = "name"
+        }
+        logging.L.Info("aws.secrets.get", "region", p.Region, kind, id)
+    }
+
+    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
 	if err != nil {
 		return nil, err
 	}
@@ -105,18 +132,24 @@ func GetSecret(ctx context.Context, p GetSecretParams) (*GetSecretResult, error)
 	}
 	ctx2, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := cli.GetSecretValue(ctx2, &secretsmanager.GetSecretValueInput{SecretId: &id})
-	if err != nil {
-		return nil, err
-	}
+    out, err := cli.GetSecretValue(ctx2, &secretsmanager.GetSecretValueInput{SecretId: &id})
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("aws.secrets.get.error", "error", err)
+        }
+        return nil, err
+    }
 	if out.SecretString == nil {
 		return nil, errors.New("secret has no SecretString")
 	}
 	var payload struct{ Username, Password string }
-	if err := json.Unmarshal([]byte(*out.SecretString), &payload); err != nil {
-		return nil, fmt.Errorf("failed to parse secret JSON: %w", err)
-	}
-	return &GetSecretResult{Username: payload.Username, Password: payload.Password}, nil
+    if err := json.Unmarshal([]byte(*out.SecretString), &payload); err != nil {
+        return nil, fmt.Errorf("failed to parse secret JSON: %w", err)
+    }
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.get.ok", "username", payload.Username)
+    }
+    return &GetSecretResult{Username: payload.Username, Password: payload.Password}, nil
 }
 
 func awsString(s string) *string { return &s }
@@ -133,15 +166,21 @@ type DescribeSecretResult struct {
 }
 
 func DescribeSecret(ctx context.Context, p DescribeSecretParams) (*DescribeSecretResult, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.describe", "region", p.Region, "id", p.Id)
+    }
+    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
 	if err != nil {
 		return nil, err
 	}
 	cli := secretsmanager.NewFromConfig(cfg)
-	out, err := cli.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{SecretId: &p.Id})
-	if err != nil {
-		return nil, err
-	}
+    out, err := cli.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{SecretId: &p.Id})
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("aws.secrets.describe.error", "error", err)
+        }
+        return nil, err
+    }
 	res := &DescribeSecretResult{}
 	if out.ARN != nil {
 		res.ARN = *out.ARN
@@ -149,7 +188,10 @@ func DescribeSecret(ctx context.Context, p DescribeSecretParams) (*DescribeSecre
 	if out.KmsKeyId != nil {
 		res.KMSKeyID = *out.KmsKeyId
 	}
-	return res, nil
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.describe.ok", "arn", res.ARN, "kms_key_id", res.KMSKeyID)
+    }
+    return res, nil
 }
 
 // DeleteSecret deletes the secret; either force delete or recovery window.
@@ -161,7 +203,10 @@ type DeleteSecretParams struct {
 }
 
 func DeleteSecret(ctx context.Context, p DeleteSecretParams) error {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.delete", "region", p.Region, "id", p.Id, "force", p.Force, "recovery_days", p.RecoveryWindowDays)
+    }
+    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(p.Region))
 	if err != nil {
 		return err
 	}
@@ -177,8 +222,17 @@ func DeleteSecret(ctx context.Context, p DeleteSecretParams) error {
 		}
 		in.RecoveryWindowInDays = awsInt64(int64(days))
 	}
-	_, err = cli.DeleteSecret(ctx, in)
-	return err
+    _, err = cli.DeleteSecret(ctx, in)
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("aws.secrets.delete.error", "error", err)
+        }
+        return err
+    }
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.delete.ok")
+    }
+    return nil
 }
 
 func awsBool(b bool) *bool    { return &b }
@@ -192,10 +246,13 @@ type SecretSummary struct {
 
 // ListMSKSecrets lists secrets with names starting with AmazonMSK_.
 func ListMSKSecrets(ctx context.Context, region string) ([]SecretSummary, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
-	if err != nil {
-		return nil, err
-	}
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.list", "region", region)
+    }
+    cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+    if err != nil {
+        return nil, err
+    }
 	cli := secretsmanager.NewFromConfig(cfg)
 	in := &secretsmanager.ListSecretsInput{
 		Filters: []smtypes.Filter{{
@@ -218,7 +275,10 @@ func ListMSKSecrets(ctx context.Context, region string) ([]SecretSummary, error)
 			}
 		}
 	}
-	return outRows, nil
+    if logging.L != nil {
+        logging.L.Info("aws.secrets.list.ok", "count", len(outRows))
+    }
+    return outRows, nil
 }
 
 func awsDeref(p *string) string {

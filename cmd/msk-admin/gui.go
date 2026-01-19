@@ -58,13 +58,13 @@ func cmdGUI() *cobra.Command {
 			}
 			runAsync := func(fn func() error) {
 				go func() {
-					setStatus("[yellow]Lade…")
+					setStatus("[yellow]Loading…")
 					err := fn()
 					if err != nil {
 						showText("[red]" + err.Error())
-						setStatus("[red]Fehler")
+						setStatus("[red]Error")
 					} else {
-						setStatus("[green]Fertig")
+						setStatus("[green]Done")
 					}
 				}()
 			}
@@ -144,7 +144,7 @@ func cmdGUI() *cobra.Command {
 					region := strings.TrimSpace(form.GetFormItemByLabel("Region").(*tview.InputField).GetText())
 					cluster := strings.TrimSpace(form.GetFormItemByLabel("Cluster ARN").(*tview.InputField).GetText())
 					if region == "" || cluster == "" {
-						showText("Region und Cluster ARN erforderlich")
+						showText("Region and Cluster ARN required")
 						return
 					}
 					runAsync(func() error {
@@ -372,9 +372,9 @@ func cmdGUI() *cobra.Command {
 			})
 
 			// Initial view: set directly (no QueueUpdate before Run)
-			text.SetText("Wähle eine Aktion im Menü links und drücke Enter…")
+			text.SetText("Choose an action from the menu on the left and press Enter…")
 			pages.SwitchToPage("text")
-			status.SetText("Bereit")
+			status.SetText("Ready")
 			if err := app.SetRoot(root, true).EnableMouse(true).Run(); err != nil {
 				return err
 			}

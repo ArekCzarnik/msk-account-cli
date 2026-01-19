@@ -147,6 +147,15 @@ Generate a clean module layout:
 - Provide helpful error messages (prefix validation, missing kms key id, auth missing, etc.)
 - Context timeouts for AWS and Kafka calls.
 
+## Logging
+All CLI actions are written as JSON logs to the `logs/` directory, in files named `msk-admin-YYYYMMDD.log`.
+
+- Sensitive values (e.g., `--password`, `--sasl-password`, tokens, secrets) are automatically masked.
+- The logger records command invocations (command path and flags), AWS/MSK operations, and success/error outcomes.
+- Example entry:
+  `{ "time": "...", "level": "INFO", "msg": "invoke", "cmd": "msk-admin account create", "secret-name": "AmazonMSK_example", "password": "********" }`
+
+
 ## Documentation snippet to embed into README
 Explain the MSK secret requirements:
 - "Other types of secrets" conceptually (we just create plaintext JSON)

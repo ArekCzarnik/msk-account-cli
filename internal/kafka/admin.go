@@ -1,17 +1,18 @@
 package kafka
 
 import (
-	"context"
-	"crypto/sha256"
-	"crypto/sha512"
-	"errors"
-	"fmt"
-	"hash"
-	"strings"
-	"time"
+    "context"
+    "crypto/sha256"
+    "crypto/sha512"
+    "errors"
+    "fmt"
+    "hash"
+    "strings"
+    "time"
 
-	"github.com/IBM/sarama"
-	xdg "github.com/xdg-go/scram"
+    "github.com/IBM/sarama"
+    "github.com/czarnik/msk-account-cli/internal/logging"
+    xdg "github.com/xdg-go/scram"
 )
 
 // AuthConfig contains Kafka connection info.
@@ -46,7 +47,14 @@ type admin struct {
 
 // NewAdmin connects and returns an Admin client.
 func NewAdmin(ctx context.Context, a AuthConfig) (*admin, error) {
-	cfg := sarama.NewConfig()
+    if logging.L != nil {
+        logging.L.Info("kafka.admin.connect",
+            "brokers", strings.Join(a.Brokers, ","),
+            "username", a.SASLUsername,
+            "scram", a.SCRAMMechanism,
+        )
+    }
+    cfg := sarama.NewConfig()
 	cfg.Version = sarama.V2_5_0_0 // MSK typically supports >= 2.x; adjust if needed
 	cfg.Net.TLS.Enable = true
 	cfg.Net.SASL.Enable = true
@@ -74,11 +82,17 @@ func NewAdmin(ctx context.Context, a AuthConfig) (*admin, error) {
 		}
 	}
 
-	ca, err := sarama.NewClusterAdmin(a.Brokers, cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &admin{ca: ca}, nil
+    ca, err := sarama.NewClusterAdmin(a.Brokers, cfg)
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("kafka.admin.connect.error", "error", err)
+        }
+        return nil, err
+    }
+    if logging.L != nil {
+        logging.L.Info("kafka.admin.connect.ok")
+    }
+    return &admin{ca: ca}, nil
 }
 
 func (a *admin) Close() error { return a.ca.Close() }
@@ -123,10 +137,21 @@ type DeleteACLsParams struct {
 }
 
 func (a *admin) CreateACL(ctx context.Context, p CreateACLParams) error {
-	resType, err := toResourceType(p.ResourceType)
-	if err != nil {
-		return err
-	}
+    if logging.L != nil {
+        logging.L.Info("kafka.acl.create",
+            "resource_type", p.ResourceType,
+            "resource_name", p.ResourceName,
+            "pattern", p.ResourcePattern,
+            "principal", p.Principal,
+            "host", p.Host,
+            "operation", p.Operation,
+            "permission", p.Permission,
+        )
+    }
+    resType, err := toResourceType(p.ResourceType)
+    if err != nil {
+        return err
+    }
 	pattType, err := toPatternType(p.ResourcePattern)
 	if err != nil {
 		return err
@@ -142,11 +167,29 @@ func (a *admin) CreateACL(ctx context.Context, p CreateACLParams) error {
 
 	res := sarama.Resource{ResourceType: resType, ResourceName: p.ResourceName, ResourcePatternType: pattType}
 	acl := sarama.Acl{Principal: p.Principal, Host: emptyOr(p.Host, "*"), Operation: op, PermissionType: perm}
-	return a.ca.CreateACL(res, acl)
+    err = a.ca.CreateACL(res, acl)
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("kafka.acl.create.error", "error", err)
+        }
+        return err
+    }
+    if logging.L != nil {
+        logging.L.Info("kafka.acl.create.ok")
+    }
+    return nil
 }
 
 func (a *admin) ListACLs(ctx context.Context, p ListACLsParams) ([]ACLEntry, error) {
-	filter := sarama.AclFilter{}
+    if logging.L != nil {
+        logging.L.Info("kafka.acl.list",
+            "resource_type", p.ResourceType,
+            "resource_name", p.ResourceName,
+            "principal", p.Principal,
+            "operation", p.Operation,
+        )
+    }
+    filter := sarama.AclFilter{}
 	if p.ResourceType != "" {
 		rt, err := toResourceType(p.ResourceType)
 		if err != nil {
@@ -169,10 +212,13 @@ func (a *admin) ListACLs(ctx context.Context, p ListACLsParams) ([]ACLEntry, err
 		}
 		filter.Operation = op
 	}
-	res, err := a.ca.ListAcls(filter)
-	if err != nil {
-		return nil, err
-	}
+    res, err := a.ca.ListAcls(filter)
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("kafka.acl.list.error", "error", err)
+        }
+        return nil, err
+    }
 	var out []ACLEntry
 	for _, ra := range res {
 		for _, acl := range ra.Acls {
@@ -187,11 +233,25 @@ func (a *admin) ListACLs(ctx context.Context, p ListACLsParams) ([]ACLEntry, err
 			})
 		}
 	}
-	return out, nil
+    if logging.L != nil {
+        logging.L.Info("kafka.acl.list.ok", "count", len(out))
+    }
+    return out, nil
 }
 
 func (a *admin) DeleteACLs(ctx context.Context, p DeleteACLsParams) ([]ACLEntry, error) {
-	filter := sarama.AclFilter{}
+    if logging.L != nil {
+        logging.L.Info("kafka.acl.delete",
+            "resource_type", p.ResourceType,
+            "resource_name", p.ResourceName,
+            "pattern", p.ResourcePattern,
+            "principal", p.Principal,
+            "host", p.Host,
+            "operation", p.Operation,
+            "permission", p.Permission,
+        )
+    }
+    filter := sarama.AclFilter{}
 	if p.ResourceType != "" {
 		rt, err := toResourceType(p.ResourceType)
 		if err != nil {
@@ -233,10 +293,13 @@ func (a *admin) DeleteACLs(ctx context.Context, p DeleteACLsParams) ([]ACLEntry,
 		filter.PermissionType = pe
 	}
 
-	matches, err := a.ca.DeleteACL(filter, false)
-	if err != nil {
-		return nil, err
-	}
+    matches, err := a.ca.DeleteACL(filter, false)
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("kafka.acl.delete.error", "error", err)
+        }
+        return nil, err
+    }
 	var out []ACLEntry
 	for _, m := range matches {
 		out = append(out, ACLEntry{
@@ -249,21 +312,33 @@ func (a *admin) DeleteACLs(ctx context.Context, p DeleteACLsParams) ([]ACLEntry,
 			Permission:      fromPermission(m.Acl.PermissionType),
 		})
 	}
-	return out, nil
+    if logging.L != nil {
+        logging.L.Info("kafka.acl.delete.ok", "count", len(out))
+    }
+    return out, nil
 }
 
 // Consumer groups
 
 func (a *admin) ListConsumerGroups(ctx context.Context) ([]string, error) {
-	m, err := a.ca.ListConsumerGroups()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(m))
-	for g := range m {
-		out = append(out, g)
-	}
-	return out, nil
+    if logging.L != nil {
+        logging.L.Info("kafka.group.list")
+    }
+    m, err := a.ca.ListConsumerGroups()
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("kafka.group.list.error", "error", err)
+        }
+        return nil, err
+    }
+    out := make([]string, 0, len(m))
+    for g := range m {
+        out = append(out, g)
+    }
+    if logging.L != nil {
+        logging.L.Info("kafka.group.list.ok", "count", len(out))
+    }
+    return out, nil
 }
 
 type GroupMember struct {
@@ -279,10 +354,16 @@ type ConsumerGroupDescription struct {
 }
 
 func (a *admin) DescribeConsumerGroup(ctx context.Context, groupID string) (*ConsumerGroupDescription, error) {
-	descs, err := a.ca.DescribeConsumerGroups([]string{groupID})
-	if err != nil {
-		return nil, err
-	}
+    if logging.L != nil {
+        logging.L.Info("kafka.group.describe", "group_id", groupID)
+    }
+    descs, err := a.ca.DescribeConsumerGroups([]string{groupID})
+    if err != nil {
+        if logging.L != nil {
+            logging.L.Error("kafka.group.describe.error", "error", err)
+        }
+        return nil, err
+    }
 	if len(descs) == 0 {
 		return nil, fmt.Errorf("group %s not found", groupID)
 	}
@@ -291,19 +372,28 @@ func (a *admin) DescribeConsumerGroup(ctx context.Context, groupID string) (*Con
 	for _, m := range d.Members {
 		out.Members = append(out.Members, GroupMember{MemberID: m.MemberId, ClientID: m.ClientId, ClientHost: m.ClientHost})
 	}
-	return out, nil
+    if logging.L != nil {
+        logging.L.Info("kafka.group.describe.ok", "members", len(out.Members), "state", out.State)
+    }
+    return out, nil
 }
 
 func (a *admin) DeleteConsumerGroups(ctx context.Context, groupIDs []string) (map[string]error, error) {
-	if len(groupIDs) == 0 {
-		return nil, errors.New("at least one group-id must be provided")
-	}
-	res := make(map[string]error, len(groupIDs))
-	for _, g := range groupIDs {
-		err := a.ca.DeleteConsumerGroup(g)
-		res[g] = err
-	}
-	return res, nil
+    if len(groupIDs) == 0 {
+        return nil, errors.New("at least one group-id must be provided")
+    }
+    if logging.L != nil {
+        logging.L.Info("kafka.group.delete", "count", len(groupIDs))
+    }
+    res := make(map[string]error, len(groupIDs))
+    for _, g := range groupIDs {
+        err := a.ca.DeleteConsumerGroup(g)
+        res[g] = err
+    }
+    if logging.L != nil {
+        logging.L.Info("kafka.group.delete.done")
+    }
+    return res, nil
 }
 
 // mapping helpers

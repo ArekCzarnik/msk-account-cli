@@ -11,7 +11,9 @@ import (
 	iaws "github.com/czarnik/msk-account-cli/internal/aws"
 	"github.com/czarnik/msk-account-cli/internal/config"
 	"github.com/czarnik/msk-account-cli/internal/kafka"
+	"github.com/czarnik/msk-account-cli/internal/logging"
 	"github.com/czarnik/msk-account-cli/internal/output"
+	"github.com/spf13/pflag"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +53,17 @@ var newKafkaAdmin = func(ctx context.Context, a kafka.AuthConfig) (kafkaAdmin, e
 }
 
 func main() {
+    // Initialize logging early so all actions are captured.
+    if err := logging.Setup("logs"); err == nil {
+        defer logging.Close()
+        if logging.L != nil {
+            logging.L.Info("start", "args", strings.Join(logging.SanitizeArgs(os.Args), " "))
+        }
+    } else {
+        // Logging init failed; continue without blocking the tool.
+        fmt.Fprintln(os.Stderr, "warning: logging setup failed:", err)
+    }
+
 	root := &cobra.Command{
 		Use:   "msk-admin",
 		Short: "Administer MSK SCRAM accounts, Kafka ACLs and consumer groups",
@@ -70,10 +83,24 @@ func main() {
 			of := strings.ToLower(outputFormat)
 			if of == "" {
 				outputFormat = "table"
-				return nil
-			}
-			if of != "table" && of != "json" {
+				// even if defaulting, still proceed to log invocation with flags
+			} else if of != "table" && of != "json" {
 				return fmt.Errorf("invalid --output %q (must be 'table' or 'json')", outputFormat)
+			}
+
+			// Log command path and flags (with password masking)
+			if logging.L != nil {
+				var kv []any
+				cmd.Flags().VisitAll(func(f *pflag.Flag) {
+					val := f.Value.String()
+					if strings.Contains(strings.ToLower(f.Name), "password") {
+						val = "********"
+					}
+					kv = append(kv, f.Name, val)
+				})
+				kv = append([]any{"cmd", cmd.CommandPath()}, kv...)
+				kv = logging.SanitizeKV(kv...)
+				logging.L.Info("invoke", kv...)
 			}
 			return nil
 		},
@@ -92,8 +119,14 @@ func main() {
 	root.AddCommand(cmdGUI())
 
 	if err := root.Execute(); err != nil {
+		if logging.L != nil {
+			logging.L.Error("command_failed", "error", err)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if logging.L != nil {
+		logging.L.Info("command_finished", "status", "ok")
 	}
 }
 
