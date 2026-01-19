@@ -1,5 +1,6 @@
-msk-account-cli. 
-Production-ready Go application (Go 1.21+) that uses AWS SDK for Go v2 (aws-sdk-go-v2) to manage Amazon MSK SCRAM accounts stored in AWS Secrets Manager, and to manage Kafka ACLs and consumer group IDs against an MSK cluster.
+## msk-account-cli 
+
+is a Application that uses the AWS SDK for Go v2 to manage Amazon MSK SCRAM accounts stored in AWS Secrets Manager and to administer Kafka ACLs and consumer group IDs on an MSK cluster.
 
 ## Goal
 Implement a CLI tool named `msk-admin` that can:
