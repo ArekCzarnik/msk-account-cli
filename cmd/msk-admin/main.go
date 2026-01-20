@@ -637,6 +637,7 @@ func cmdACL() *cobra.Command {
 	acl.AddCommand(cmdACLCreate())
 	acl.AddCommand(cmdACLList())
 	acl.AddCommand(cmdACLDelete())
+	acl.AddCommand(cmdACLTest())
 	return acl
 }
 
@@ -861,6 +862,71 @@ func cmdACLDelete() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "Host filter")
 	cmd.Flags().StringVar(&operation, "operation", "", "Operation")
 	cmd.Flags().StringVar(&permission, "permission", "", "Permission: allow|deny")
+	return cmd
+}
+
+// acl test command
+func cmdACLTest() *cobra.Command {
+	var auth kafkaAuthFlags
+	var mode string
+	var topic string
+	var groupID string
+	var message string
+	var timeoutSec int
+	cmd := &cobra.Command{
+		Use:   "test",
+		Short: "Test Kafka permissions by attempting an operation (produce|consume|describe-topic)",
+		Long:  "Runs a lightweight check against the cluster to verify that the configured credentials can perform a selected operation. Useful to validate ACL changes.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := context.WithTimeout(cmd.Context(), time.Duration(timeoutSec)*time.Second)
+			defer cancel()
+			ac, err := auth.buildAuth(ctx)
+			if err != nil {
+				return err
+			}
+			m := strings.ToLower(strings.TrimSpace(mode))
+			switch m {
+			case "produce":
+				if strings.TrimSpace(topic) == "" {
+					return errors.New("--topic is required for mode=produce")
+				}
+				if message == "" {
+					message = fmt.Sprintf("msk-acl-test %s", time.Now().Format(time.RFC3339))
+				}
+				if err := kafka.TestProduce(ctx, ac, topic, []byte(message)); err != nil {
+					return err
+				}
+			case "consume":
+				if strings.TrimSpace(topic) == "" {
+					return errors.New("--topic is required for mode=consume")
+				}
+				gid := strings.TrimSpace(groupID)
+				if gid == "" {
+					gid = fmt.Sprintf("msk-acl-test-%d", time.Now().UnixNano())
+				}
+				if err := kafka.TestConsume(ctx, ac, topic, gid); err != nil {
+					return err
+				}
+			case "describe-topic":
+				if strings.TrimSpace(topic) == "" {
+					return errors.New("--topic is required for mode=describe-topic")
+				}
+				if err := kafka.TestDescribeTopic(ctx, ac, topic); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("invalid --mode %q (must be produce|consume|describe-topic)", mode)
+			}
+			fmt.Fprintln(os.Stdout, "ok")
+			return nil
+		},
+	}
+	auth.addFlags(cmd)
+	cmd.Flags().StringVar(&mode, "mode", "describe-topic", "Test mode: produce|consume|describe-topic")
+	cmd.Flags().StringVar(&topic, "topic", "", "Kafka topic to target")
+	cmd.Flags().StringVar(&groupID, "group-id", "", "Consumer group id to use for mode=consume (defaults to generated)")
+	cmd.Flags().StringVar(&message, "message", "", "Message payload for mode=produce (defaults to small test string)")
+	cmd.Flags().IntVar(&timeoutSec, "timeout", 10, "Timeout in seconds for the test operation")
 	return cmd
 }
 

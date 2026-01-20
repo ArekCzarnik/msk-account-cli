@@ -67,6 +67,22 @@ ACL management
 - Delete ACLs by filter
   `bin/msk-admin acl delete --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss' --resource-type topic --resource-name foo --operation read --permission allow`
 
+ACL testing
+
+- Verify topic describe permission (non-intrusive)
+  `bin/msk-admin acl test --mode describe-topic --topic foo --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1`
+
+- Verify produce permission (sends one small message)
+  `bin/msk-admin acl test --mode produce --topic foo --brokers <broker-list> --sasl-username alice --sasl-password 'S3cretP@ss'`
+
+- Verify consumer group join/topic access (best-effort)
+  `bin/msk-admin acl test --mode consume --topic foo --brokers <broker-list> --secret-arn <secret-arn> --region eu-central-1`
+
+Hinweise:
+- `describe-topic` prüft, ob Metadaten des Topics abrufbar sind (benötigt i. d. R. DESCRIBE).
+- `produce` sendet eine einzelne Test‑Nachricht. Das Topic muss existieren (sofern Auto‑Create deaktiviert ist).
+- `consume` validiert vor allem den Group‑Beitritt (READ auf Group). Ohne Nachrichten im Topic kann das reine Topic‑READ ggf. nicht vollständig geprüft werden.
+
 Consumer groups
 
 - List groups

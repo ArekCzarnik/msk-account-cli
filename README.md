@@ -1,8 +1,10 @@
-## msk-account-cli
+## MSK-ACCOUNT-CLI
 
-![msk-account-cli.png](docs/msk-account-cli.png)
+
 
 is an application that uses the AWS SDK for Go v2 to manage Amazon MSK SCRAM accounts stored in AWS Secrets Manager and to administer Kafka ACLs and consumer group IDs on an MSK cluster.
+
+![msk-account-cli.png](docs/msk-account-cli.png)
 
 ## Goal
 Implement a CLI tool named `msk-account-cli` that can:
@@ -107,6 +109,25 @@ Implement with cobra OR standard library flag parsing (cobra preferred). Provide
     - same as list/create, but used as filter for deletions
       Behavior:
     - Delete matching ACLs, print what was removed.
+
+### ACL testing
+Run targeted, non-destructive checks to verify that credentials and ACLs allow specific operations. Useful right after creating/updating ACLs.
+
+- `msk-account-cli acl test --mode describe-topic --topic <name>`
+  - Verifies metadata access (DESCRIBE) for a topic.
+  - Auth via `--sasl-username/--sasl-password` or `--secret-arn --region`.
+
+- `msk-account-cli acl test --mode produce --topic <name> [--message "test"]`
+  - Sends exactly one small message to the topic (WRITE permission).
+  - Requires existing topic when auto-create is disabled.
+
+- `msk-account-cli acl test --mode consume --topic <name> [--group-id my-check]`
+  - Joins a consumer group and polls briefly (validates group access; topic READ is best‑effort if no data present).
+
+Common flags
+- `--brokers` comma-separated list
+- `--secret-arn` + `--region` or `--sasl-username` + `--sasl-password`
+- `--scram-mechanism sha256|sha512` (default sha512), `--timeout <sec>` (default 10)
 
 ### Consumer group (Group-ID) management
 - `msk-account-cli group list`
