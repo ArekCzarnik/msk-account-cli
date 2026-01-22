@@ -471,6 +471,76 @@ func toResourceType(s string) (sarama.AclResourceType, error) {
 	return 0, fmt.Errorf("unknown resource type %q", s)
 }
 
+// ------------------------
+// Topic operations
+// ------------------------
+
+type TopicSpec struct {
+	Name              string
+	Partitions        int32
+	ReplicationFactor int16
+	Configs           map[string]string
+}
+
+// EnsureTopicExists creates the topic if it does not exist. Returns true when created.
+func (a *admin) EnsureTopicExists(ctx context.Context, s TopicSpec) (bool, error) {
+	tctx, span := otel.Tracer("github.com/czarnik/msk-account-cli/kafka").Start(ctx, "kafka.topic.ensure",
+		trace.WithAttributes(
+			attribute.String("topic", s.Name),
+			attribute.Int("partitions", int(s.Partitions)),
+			attribute.Int("replication_factor", int(s.ReplicationFactor)),
+		),
+	)
+	defer span.End()
+	_ = tctx
+	if logging.L != nil {
+		logging.L.Info("kafka.topic.ensure", "topic", s.Name, "partitions", s.Partitions, "replication", s.ReplicationFactor)
+	}
+	// existence check
+	topics, err := a.ca.ListTopics()
+	if err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.topic.list.error", "error", err)
+		}
+		return false, err
+	}
+	if _, ok := topics[s.Name]; ok {
+		if logging.L != nil {
+			logging.L.Info("kafka.topic.exists", "topic", s.Name)
+		}
+		return false, nil
+	}
+	// defaults
+	parts := s.Partitions
+	if parts <= 0 {
+		parts = 1
+	}
+	repl := s.ReplicationFactor
+	if repl <= 0 {
+		repl = 1
+	}
+	// config entries
+	var cfgEntries map[string]*string
+	if len(s.Configs) > 0 {
+		cfgEntries = make(map[string]*string, len(s.Configs))
+		for k, v := range s.Configs {
+			vv := v
+			cfgEntries[k] = &vv
+		}
+	}
+	detail := &sarama.TopicDetail{NumPartitions: parts, ReplicationFactor: repl, ConfigEntries: cfgEntries}
+	if err := a.ca.CreateTopic(s.Name, detail, false); err != nil {
+		if logging.L != nil {
+			logging.L.Error("kafka.topic.create.error", "error", err)
+		}
+		return false, err
+	}
+	if logging.L != nil {
+		logging.L.Info("kafka.topic.create.ok", "topic", s.Name)
+	}
+	return true, nil
+}
+
 func fromResourceType(t sarama.AclResourceType) string {
 	switch t {
 	case sarama.AclResourceTopic:

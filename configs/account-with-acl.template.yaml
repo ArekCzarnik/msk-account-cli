@@ -1,0 +1,129 @@
+# Provision-Plan für vollständigen MSK-Account inkl. ACLs
+#
+# Zweck
+# - Alle Eingaben für folgende Schritte in EINER Datei sammeln:
+#   1) `account create` (Secret in Secrets Manager anlegen, optional KMS-Key erzeugen)
+#   2) `msk associate-secret` (Secret mit MSK-Cluster verknüpfen)
+#   3) `acl create` (Kafka-ACLs für den neuen Benutzer setzen)
+#
+# Hinweise zur Ausführung:
+# - Automatisiert:
+#     - Apply:     bin/msk-account-cli apply -f configs/account-with-acl.template.yaml
+#     - Dry‑Run:   bin/msk-account-cli apply -f configs/account-with-acl.template.yaml --dry-run
+#     - Rollback:  bin/msk-account-cli apply rollback -f configs/account-with-acl.template.yaml
+# - Manuell (falls nötig):
+#     a) bin/msk-account-cli account create ...
+#     b) bin/msk-account-cli msk associate-secret ...
+#     c) bin/msk-account-cli acl create ... (für jede ACL in `acls:`)
+# - Platzhalter ${account.username} im Feld `principal` steht für "User:<username>".
+
+version: v1
+kind: provision-account
+
+metadata:
+  name: example-alice-dev
+  environment: dev
+
+aws:
+  # Wird für Secrets Manager und MSK verwendet (entspricht --region)
+  region: eu-central-1
+
+  # Ziel-Cluster für das Verknüpfen des Secrets (entspricht --cluster-arn)
+  cluster_arn: arn:aws:kafka:eu-central-1:111122223333:cluster/dev/abcd-efgh
+
+# Verbindung und Admin-Authentisierung zum Kafka-Cluster während ACL-Erstellung
+admin_connection:
+  brokers:
+    - b-1.example.kafka.amazonaws.com:9096
+    - b-2.example.kafka.amazonaws.com:9096
+
+  # Authentisierung für die Admin-Aktion (ACLs setzen). Eine der Varianten verwenden:
+  auth:
+    # Variante A: Admin nutzt Secret aus Secrets Manager
+    secret_arn: arn:aws:secretsmanager:eu-central-1:111122223333:secret:AmazonMSK_admin-XXXX
+    region: eu-central-1
+
+    # Variante B: Admin via SASL Benutzer/PW (auskommentiert lassen wenn Variante A genutzt wird)
+    # sasl_username: admin
+    # sasl_password: "AdminSecretP@ss"
+
+    # SCRAM-Mechanismus: sha512 (Standard) oder sha256
+    scram_mechanism: sha512
+
+# Topics (optional): werden erzeugt, falls nicht vorhanden
+topics:
+  - name: foo
+    partitions: 3               # Default: 1
+    replication_factor: 2       # Default: 1 (stelle sicher, dass genug Broker vorhanden sind)
+    create_if_missing: true     # true = anlegen, wenn Topic nicht existiert
+    configs:
+      cleanup.policy: compact   # beliebige Topic-Configs (optional)
+
+account:
+  # Entspricht --secret-name (MUSS mit "AmazonMSK_" beginnen)
+  secret_name: AmazonMSK_alice
+
+  # Zugangsdaten für das Secret (werden als JSON {username,password} gespeichert)
+  username: alice
+  password: "S3cretP@ss"
+  # Alternative: Passwort aus Umgebungsvariable lesen (falls Tool dies unterstützt)
+  # password_from_env: MSK_ADMIN_PASSWORD
+
+  # Optionale Tags für das Secret (entspricht wiederholbarem --tags key=value)
+  tags:
+    env: dev
+    owner: platform
+
+  # KMS-Konfiguration für das Secret
+  kms:
+    # Vorhandenen, kundengemanagten KMS-Key verwenden (entspricht --kms-key-id)
+    use_existing_key: true
+    kms_key_id: arn:aws:kms:eu-central-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+
+    # Alternativ einen neuen KMS-Key anlegen (entspricht --create-kms-key ...)
+    create: false
+    description: "MSK SCRAM secrets"
+    multi_region: false
+    tags:
+      app: msk-admin
+
+  # Nach Secret-Erstellung direkt mit MSK-Cluster verknüpfen (msk associate-secret)
+  associate_with_cluster: true
+
+# ACL-Definitionen für den NEUEN Benutzer
+# Hinweis: principal = "User:<username>". Hier kann der Platzhalter ${account.username} verwendet werden.
+acls:
+  # Gute Praxis: Topic DESCRIBE + READ erlauben
+  - resource_type: topic            # --resource-type
+    resource_name: foo              # --resource-name
+    resource_pattern: literal       # --resource-pattern literal|prefixed (Standard: literal)
+    principal: "User:${account.username}"  # --principal, ersetzt zu "User:alice"
+    host: "*"                      # --host (Standard: "*")
+    operation: describe             # --operation
+    permission: allow               # --permission allow|deny (Standard: allow)
+
+  - resource_type: topic
+    resource_name: foo
+    resource_pattern: literal
+    principal: "User:${account.username}"
+    host: "*"
+    operation: read
+    permission: allow
+
+  # Consumer-Group Zugriff (Group-ID READ)
+  - resource_type: group
+    resource_name: my-app
+    resource_pattern: literal
+    principal: "User:${account.username}"
+    host: "*"
+    operation: read
+    permission: allow
+
+  # Optional: PRODUCE-Rechte (WRITE) auf Topic
+  - resource_type: topic
+    resource_name: foo
+    resource_pattern: literal
+    principal: "User:${account.username}"
+    host: "*"
+    operation: write
+    permission: allow

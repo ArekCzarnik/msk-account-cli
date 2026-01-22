@@ -6,6 +6,18 @@ is an application that uses the AWS SDK for Go v2 to manage Amazon MSK SCRAM acc
 
 ![msk-account-cli.png](docs/msk-account-cli.png)
 
+## Capabilities & Benefits (at a glance)
+
+- Create, read, list and delete MSK SCRAM credentials in AWS Secrets Manager, with strict guardrails (AmazonMSK_ prefix, customer‑managed KMS key; optional on‑the‑fly KMS key creation).
+- Pipline ready provisioning from YAML: `apply` reads one file, a directory, or a glob; ensures topics, creates the account, associates the secret, and applies ACLs.
+- Associate/disassociate SCRAM secrets with MSK clusters via MSK APIs.
+- Manage Kafka ACLs (create/list/delete) and consumer groups (list/describe/delete) over TLS + SCRAM (SHA‑512 default, SHA‑256 supported).
+- Safety features: dry‑run (preview actions) and rollback (remove ACLs, disassociate and delete the secret, schedule KMS deletion when applicable).
+- Topic ensure/create: provision topics with partitions, replication factor and configs before ACLs are applied.
+- Flexible auth: either `--secret-arn --region` (pull username/password from Secrets Manager) or `--sasl-username --sasl-password`.
+- Config defaults from `default-config.yaml` with flag override; outputs as table or JSON.
+- Built‑in observability and auditing: local masked JSON logs plus optional OpenTelemetry traces/logs (opt‑in via OTEL env vars).
+
 ## Goal
 Implement a CLI tool named `msk-account-cli` that can:
 1) Create and retrieve SCRAM credentials in AWS Secrets Manager following MSK requirements.

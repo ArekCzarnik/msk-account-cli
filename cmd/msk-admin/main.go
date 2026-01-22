@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/czarnik/msk-account-cli/internal/apply"
 	iaws "github.com/czarnik/msk-account-cli/internal/aws"
 	"github.com/czarnik/msk-account-cli/internal/config"
 	"github.com/czarnik/msk-account-cli/internal/kafka"
@@ -150,6 +153,8 @@ func main() {
 	root.AddCommand(cmdGroup())
 	// gui command
 	root.AddCommand(cmdGUI())
+	// apply command
+	root.AddCommand(cmdApply())
 
 	// Start a root span for the entire CLI run and propagate via root context
 	tr := otel.Tracer("github.com/czarnik/msk-account-cli/cli")
@@ -193,6 +198,178 @@ func cmdAccount() *cobra.Command {
 	account.AddCommand(cmdAccountDelete())
 	account.AddCommand(cmdAccountList())
 	return account
+}
+
+// ------------------------
+// apply command
+// ------------------------
+
+func cmdApply() *cobra.Command {
+	var file string
+	var dryRun bool
+	var rollbackOnError bool
+	cmd := &cobra.Command{
+		Use:   "apply",
+		Short: "Apply a provision plan YAML to create an account, associate it to MSK, and create ACLs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(file) == "" {
+				return errors.New("--file is required")
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+			defer cancel()
+			files, err := resolvePlanFiles(file)
+			if err != nil {
+				return err
+			}
+
+			type item struct {
+				File string        `json:"file"`
+				Res  *apply.Result `json:"result,omitempty"`
+				Err  string        `json:"error,omitempty"`
+			}
+			var results []item
+			for _, f := range files {
+				plan, err := apply.LoadPlan(f)
+				if err != nil {
+					if strings.ToLower(outputFormat) == "json" {
+						results = append(results, item{File: f, Err: err.Error()})
+					} else {
+						fmt.Fprintf(os.Stderr, "error loading %s: %v\n", f, err)
+					}
+					return err
+				}
+				res, err := apply.Apply(ctx, plan, &apply.Options{DryRun: dryRun, RollbackOnError: rollbackOnError})
+				if err != nil {
+					if strings.ToLower(outputFormat) == "json" {
+						results = append(results, item{File: f, Err: err.Error()})
+					} else {
+						fmt.Fprintf(os.Stderr, "apply failed for %s: %v\n", f, err)
+					}
+					return err
+				}
+				if strings.ToLower(outputFormat) == "json" {
+					results = append(results, item{File: f, Res: res})
+				} else {
+					fmt.Fprintf(os.Stdout, "file: %s\n", f)
+					if dryRun {
+						fmt.Fprintln(os.Stdout, "  dry-run: true")
+						fmt.Fprintf(os.Stdout, "  planned_acls: %d\n", res.ACLsCreated)
+						if res.Associated {
+							fmt.Fprintln(os.Stdout, "  associate: true")
+						}
+					} else {
+						fmt.Fprintf(os.Stdout, "  secret: %s\n  acls_created: %d\n  associated: %v\n  kms_key_created: %v\n", res.SecretARN, res.ACLsCreated, res.Associated, res.KMSKeyCreated)
+					}
+				}
+			}
+			if strings.ToLower(outputFormat) == "json" {
+				return output.PrintJSON(results)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&file, "file", "f", "", "Path, directory or glob to YAML plan(s) (e.g. configs/plan.yaml or configs/ or configs/*.yaml)")
+	_ = cmd.MarkFlagRequired("file")
+	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Only validate and print planned actions; do not change anything")
+	cmd.Flags().BoolVar(&rollbackOnError, "rollback-on-error", true, "Attempt rollback of created resources if apply fails")
+
+	// Subcommand: rollback
+	cmd.AddCommand(cmdApplyRollback())
+	return cmd
+}
+
+func resolvePlanFiles(spec string) ([]string, error) {
+	s := strings.TrimSpace(spec)
+	// If contains glob chars, expand
+	if strings.ContainsAny(s, "*?[") {
+		matches, err := filepath.Glob(s)
+		if err != nil {
+			return nil, err
+		}
+		out := filterYAMLFiles(matches)
+		if len(out) == 0 {
+			return nil, fmt.Errorf("no files match %q", s)
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+	// Stat path
+	fi, err := os.Stat(s)
+	if err != nil {
+		return nil, err
+	}
+	if fi.IsDir() {
+		entries, err := os.ReadDir(s)
+		if err != nil {
+			return nil, err
+		}
+		var out []string
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if isYAML(name) {
+				out = append(out, filepath.Join(s, name))
+			}
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("no YAML files in directory %q", s)
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+	// single file
+	return []string{s}, nil
+}
+
+func isYAML(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml")
+}
+
+func filterYAMLFiles(files []string) []string {
+	var out []string
+	for _, f := range files {
+		if isYAML(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func cmdApplyRollback() *cobra.Command {
+	var file string
+	var force bool
+	var kmsPending int32
+	cmd := &cobra.Command{
+		Use:   "rollback",
+		Short: "Rollback resources described by a provision plan (delete ACLs, disassociate secret, delete secret, schedule KMS key deletion if created)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(file) == "" {
+				return errors.New("--file is required")
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+			defer cancel()
+			plan, err := apply.LoadPlan(file)
+			if err != nil {
+				return err
+			}
+			if err := apply.Rollback(ctx, plan, apply.RollbackOptions{ForceSecretDelete: force, KMSPendingWindowDays: kmsPending}); err != nil {
+				return err
+			}
+			if strings.ToLower(outputFormat) == "json" {
+				return output.PrintJSON(map[string]any{"status": "rolled_back"})
+			}
+			fmt.Fprintln(os.Stdout, "rolled back")
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&file, "file", "f", "", "Path to provision YAML")
+	_ = cmd.MarkFlagRequired("file")
+	cmd.Flags().BoolVar(&force, "force", false, "Force delete secret without recovery (irreversible)")
+	cmd.Flags().Int32Var(&kmsPending, "kms-pending-window-days", 30, "KMS key deletion pending window (7..30)")
+	return cmd
 }
 
 func cmdAccountCreate() *cobra.Command {
